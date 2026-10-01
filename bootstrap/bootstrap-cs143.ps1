@@ -3,7 +3,7 @@
     Bootstraps a Windows machine for CS143 -- no administrator rights needed.
 
 .DESCRIPTION
-    - Installs Git (per-user)
+    - Installs Git (PortableGit, per-user)
     - Helps pin Windows Terminal to the taskbar
     - Installs Python (per-user)
     - Installs Claude Code
@@ -74,21 +74,24 @@ function Invoke-Download([string]$Url, [string]$FileName) {
 
 # --- 1. Git ------------------------------------------------------------------
 Write-Step 'Installing Git'
+$gitDir = Join-Path $env:LOCALAPPDATA 'Programs\Git'
 if (Test-Command 'git') {
     Write-Host 'Git is already installed.'
-} elseif (-not (Install-WithWinget 'Git.Git')) {
-    Write-Host 'winget unavailable for Git; using the Git for Windows installer instead.'
+} else {
+    # Not winget or the Git for Windows installer: both run the Inno Setup
+    # installer, which prompts for admin even with --scope user / /CURRENTUSER.
+    # PortableGit is a self-extracting archive and never needs elevation.
     $release = Invoke-RestMethod -Uri 'https://api.github.com/repos/git-for-windows/git/releases/latest' `
         -Headers @{ 'User-Agent' = 'cs143-bootstrap' }
-    $asset = $release.assets | Where-Object { $_.name -match '^Git-[\d.]+-64-bit\.exe$' } | Select-Object -First 1
-    if (-not $asset) { throw 'Could not find the Git for Windows installer in the latest release.' }
-    $installer = Invoke-Download $asset.browser_download_url $asset.name
-    # /CURRENTUSER installs into %LOCALAPPDATA%\Programs\Git without admin.
-    Start-Process -FilePath $installer -Wait -ArgumentList `
-        '/VERYSILENT', '/NORESTART', '/SUPPRESSMSGBOXES', '/CURRENTUSER', '/NOCANCEL', '/SP-'
-    Update-SessionPath
-    if (-not (Test-Command 'git')) { Add-UserPath (Join-Path $env:LOCALAPPDATA 'Programs\Git\cmd') }
+    $asset = $release.assets | Where-Object { $_.name -match '^PortableGit-[\d.]+-64-bit\.7z\.exe$' } | Select-Object -First 1
+    if (-not $asset) { throw 'Could not find PortableGit in the latest Git for Windows release.' }
+    $archive = Invoke-Download $asset.browser_download_url $asset.name
+    Write-Host "Extracting to $gitDir"
+    $proc = Start-Process -FilePath $archive -Wait -PassThru -ArgumentList '-y', "-o`"$gitDir`""
+    if ($proc.ExitCode -ne 0) { throw "PortableGit extraction failed (exit code $($proc.ExitCode))." }
+    Remove-Item $archive -ErrorAction SilentlyContinue
 }
+if (Test-Path (Join-Path $gitDir 'cmd\git.exe')) { Add-UserPath (Join-Path $gitDir 'cmd') }
 
 # --- 2. Pin Windows Terminal to the taskbar ---------------------------------
 # Windows 11 only allows programmatic taskbar pinning through admin-controlled
